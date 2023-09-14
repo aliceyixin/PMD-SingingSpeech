@@ -1,0 +1,302 @@
+# Seed needs to be set at top of yaml, before objects with parameters are made
+seed: 1986
+__set_seed: !!python/object/apply:torch.manual_seed [!ref <seed>]
+noise_snr: 0
+
+dataset: PMDA
+dataset_split: PMRead2PMSing_SF
+source: PMRead
+target: PMSing
+
+model_class: DADAN_SS
+smooth_tolerance: 5  #  in frames
+
+experiment_id: !ref ${source}2${target}_sff
+output_dir: !ref ./results/<model_class>/<experiment_id>
+save_folder: !ref <output_dir>/save
+train_log: !ref <output_dir>/train_log.txt
+
+# Data files
+n_phonation: 4  # 3 + 1 rest
+lambda_adv: 0.5  # domain loss 
+lambda_domain: 0.2
+lambda_mi: 0.2
+embedding_norm: stand  # or None, l2, batch, stand
+savept_path: !ref ./results/pretrainCRNN_SS/<source>_SF_sff/checkpoints_pt/
+save_this_pt_path: !ref <output_dir>/checkpoints_pt/
+
+prepare:
+    source_dataset_dir: !ref ../data/PMSetAudio/utterance_lvl/<source>/
+    target_dataset_dir: !ref ../data/PMSetAudio/utterance_lvl/<target>/
+    train_json_path: !ref ./datasets/<dataset>/<dataset_split>/train.json
+    valid_json_path: !ref ./datasets/<dataset>/<dataset_split>/valid.json
+    test_json_path: !ref ./datasets/<dataset>/<dataset_split>/test.json
+    shuffle_data: True
+    computed_dataset_dir: !ref ./datasets/<dataset>/<dataset_split>/computed_dataset_sff/
+    sff_data_path: !ref ./datasets/<dataset>/<dataset_split>/sff_data/
+    AM_data_path: None  # !ref ./datasets/<dataset>/<dataset_split>/AM_data/
+    seed: !ref <seed>
+
+# Feature parameters
+sample_rate: 48000
+resample_rate: 16000
+win_length: 25
+hop_length: 10  # ms
+n_fft: 2048
+n_mels: 128
+blank_index: 'rest'
+n_sff: 400
+step_Hz: 10
+n_ztw: 0
+
+compute_sff_features: !new:modules.features.load_SFFspectrogram
+    sff_data_path: !ref ./datasets/<dataset>/<dataset_split>/sff_data/
+
+# Added noise and reverb come from OpenRIR dataset, automatically
+# downloaded and prepared with this Environmental Corruption class.
+env_corrupt: !new:speechbrain.lobes.augment.EnvCorrupt
+    openrir_folder: ../data/openrir
+    babble_prob: 0.0
+    reverb_prob: 0.0
+    noise_prob: 0.0
+    noise_snr_low: !ref <noise_snr>
+    noise_snr_high: !ref <noise_snr>
+    rir_scale_factor: 1
+
+
+# The train logger writes training statistics to a file, as well as stdout.
+train_logger: !new:speechbrain.utils.train_logger.FileTrainLogger
+    save_file: !ref <train_log>
+
+error_stats: !name:speechbrain.utils.metric_stats.MetricStats
+    metric: !name:speechbrain.nnet.losses.classification_error
+        reduction: batch
+
+## Training Model Parameters
+batch_size: 2
+n_epochs: 50
+lr_encoder: 1.0e-4
+lr_classifier: 1.0e-4
+lr_discriminator: 1.0e-4
+lr_dencoder: 1.0e-4
+lr_dclassifier: 1.0e-4
+lr_mine: 1.0e-4
+ckpt_interval_minutes: 15 # save checkpoint every N min
+
+# dataset and dataloader options
+sorting: None  # ascending # choose between ascending, descending and random
+train_dataloader_opts:
+    batch_size: !ref <batch_size>
+    shuffle: False
+valid_dataloader_opts:
+    batch_size: !ref <batch_size>
+test_dataloader_opts:
+    batch_size: !ref <batch_size>
+
+
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+    limit: !ref <n_epochs>
+
+checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
+    checkpoints_dir: !ref <output_dir>/checkpoints
+    recoverables:
+        normalizer: !ref <normalizer>
+        Encoder: !ref <Encoder>
+        Classifier: !ref <Classifier>
+        Discriminator: !ref <Discriminator>
+        DEncoder: !ref <DEncoder>
+        DClassifier: !ref <DClassifier>
+        MINE: !ref <MINE>
+        epoch_counter: !ref <epoch_counter>
+        scheduler_E: !ref <lr_annealing_E>
+        scheduler_D: !ref <lr_annealing_D>
+        scheduler_C: !ref <lr_annealing_C>
+        scheduler_DE: !ref <lr_annealing_DE>
+        scheduler_DC: !ref <lr_annealing_DC>
+
+normalizer: !new:speechbrain.processing.features.InputNormalization
+    norm_type: global
+
+optimizers:
+    E_opt:
+        opt_class: !name:torch.optim.Adam
+            lr: !ref <lr_encoder>
+        modules:
+            - Encoder
+    D_opt:
+        opt_class: !name:torch.optim.Adam
+            lr: !ref <lr_discriminator>
+        modules:
+            - Discriminator    
+    C_opt:
+        opt_class: !name:torch.optim.Adam
+            lr: !ref <lr_classifier>
+        modules:
+            - Classifier    
+    DE_opt:
+        opt_class: !name:torch.optim.Adam
+            lr: !ref <lr_dencoder>
+        modules:
+            - DEncoder
+    DC_opt:
+        opt_class: !name:torch.optim.Adam
+            lr: !ref <lr_dclassifier>
+        modules:
+            - DClassifier
+    MI_opt:
+        opt_class: !name:torch.optim.Adam
+            lr: !ref <lr_mine>
+        modules:
+            - MINE
+
+lr_annealing_E: !new:speechbrain.nnet.schedulers.NewBobScheduler
+    initial_value: !ref <lr_encoder>
+    improvement_threshold: 0.0025
+    annealing_factor: 0.8
+    patient: 0
+
+lr_annealing_D: !new:speechbrain.nnet.schedulers.NewBobScheduler
+    initial_value: !ref <lr_discriminator>
+    improvement_threshold: 0.0025
+    annealing_factor: 0.8
+    patient: 0
+
+lr_annealing_C: !new:speechbrain.nnet.schedulers.NewBobScheduler
+    initial_value: !ref <lr_classifier>
+    improvement_threshold: 0.0025
+    annealing_factor: 0.8
+    patient: 0
+
+lr_annealing_DE: !new:speechbrain.nnet.schedulers.NewBobScheduler
+    initial_value: !ref <lr_dencoder>
+    improvement_threshold: 0.0025
+    annealing_factor: 0.8
+    patient: 0
+
+lr_annealing_DC: !new:speechbrain.nnet.schedulers.NewBobScheduler
+    initial_value: !ref <lr_dclassifier>
+    improvement_threshold: 0.0025
+    annealing_factor: 0.8
+    patient: 0
+
+lr_annealing_MI: !new:speechbrain.nnet.schedulers.NewBobScheduler
+    initial_value: !ref <lr_mine>
+    improvement_threshold: 0.0025
+    annealing_factor: 0.8
+    patient: 0
+
+# Model parameters--------------------------------------------
+activation: !name:torch.nn.LeakyReLU
+dropout: 0.15
+cnn_blocks: 2
+cnn_channels: (16, 16)  #, 16, 64, 64)
+inter_layer_pooling_size: (2, 2) #, 2 , 2, 2)
+cnn_kernelsize: (3, 3)
+# time_pooling_size: 4
+rnn_class: !name:speechbrain.nnet.RNN.LSTM
+rnn_layers: 2  # 5
+rnn_neurons: 256
+rnn_bidirectional: True
+dnn_blocks: 1  # 3
+dnn_neurons: 256
+output_neurons: !ref <n_phonation>  # index(blank/eos/bos) = 0
+
+Encoder: !new:speechbrain.lobes.models.CRDNN.CRDNN
+    input_size: !ref <n_sff>
+    activation: !ref <activation>
+    dropout: !ref <dropout>
+    cnn_blocks: !ref <cnn_blocks>
+    cnn_channels: !ref <cnn_channels>
+    cnn_kernelsize: !ref <cnn_kernelsize>
+    inter_layer_pooling_size: !ref <inter_layer_pooling_size>
+    time_pooling: False
+    using_2d_pooling: False
+    rnn_class: !ref <rnn_class>
+    rnn_layers: !ref <rnn_layers>
+    rnn_neurons: !ref <rnn_neurons>
+    rnn_bidirectional: !ref <rnn_bidirectional>
+    rnn_re_init: True
+    dnn_blocks: !ref <dnn_blocks>
+    dnn_neurons: !ref <dnn_neurons>
+
+Classifier: !new:modules.DA_block.FCBlock
+    fc_sizes: (256, 64, 4)
+
+Discriminator: !new:modules.DA_block.FCBlock
+    fc_sizes: (256, 64, 1)
+
+DEncoder: !new:speechbrain.lobes.models.CRDNN.CRDNN
+    input_size: !ref <n_sff>
+    activation: !ref <activation>
+    dropout: !ref <dropout>
+    cnn_blocks: !ref <cnn_blocks>
+    cnn_channels: !ref <cnn_channels>
+    cnn_kernelsize: !ref <cnn_kernelsize>
+    inter_layer_pooling_size: !ref <inter_layer_pooling_size>
+    time_pooling: False
+    using_2d_pooling: False
+    rnn_class: !ref <rnn_class>
+    rnn_layers: !ref <rnn_layers>
+    rnn_neurons: !ref <rnn_neurons>
+    rnn_bidirectional: !ref <rnn_bidirectional>
+    rnn_re_init: True
+    dnn_blocks: !ref <dnn_blocks>
+    dnn_neurons: !ref <dnn_neurons>
+
+DClassifier: !new:modules.DA_block.FCBlock
+    fc_sizes: (256, 64, 1)
+
+MINE: !new:modules.mine.MINE
+    hidden_size: 64
+
+modules:
+    normalizer: !ref <normalizer>
+    Encoder: !ref <Encoder>
+    Classifier: !ref <Classifier>
+    Discriminator: !ref <Discriminator>
+    DEncoder: !ref <DEncoder>
+    DClassifier: !ref <DClassifier>
+    MINE: !ref <MINE>
+
+# ---------------------------------------------------------------
+# evaluation metrics
+metric_keys:
+    - pmd_loss
+    - adv_loss
+    - domain_loss
+    - mi_loss
+    - src_phlvl.ACC_class
+    - src_phlvl.PRE_class
+    - src_phlvl.REC_class
+    - src_phlvl.F1_class
+    - src_phlvl.ACC_instance
+    - src_phlvl.PRE_instance
+    - src_phlvl.REC_instance
+    - src_phlvl.F1_instance
+    - src_phlvl.ER
+    - src_hlvl.F1_breathy_class
+    - src_phlvl.F1_neutral_class
+    - src_phlvl.F1_pressed_class
+    - src_seg.PRE
+    - src_seg.REC
+    - src_seg.F1
+    - src_seg.ER
+    - tgt_phlvl.ACC_class
+    - tgt_phlvl.PRE_class
+    - tgt_phlvl.REC_class
+    - tgt_phlvl.F1_class
+    - tgt_phlvl.ACC_instance
+    - tgt_phlvl.PRE_instance
+    - tgt_phlvl.REC_instance
+    - tgt_phlvl.F1_instance
+    - tgt_phlvl.ER
+    - tgt_phlvl.F1_breathy_class
+    - tgt_phlvl.F1_neutral_class
+    - tgt_phlvl.F1_pressed_class
+    - tgt_seg.PRE
+    - tgt_seg.REC
+    - tgt_seg.F1
+    - tgt_eg.ER
+
+max_key: src_phlvl.F1_class
+min_key: None
