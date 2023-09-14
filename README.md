@@ -1,5 +1,6 @@
 # PMD-SingingSpeech
-This is the author's official PyTorch implementation for ["Disentangled Adversarial Domain Adaptation for Phonation Mode Detection in Singing and Speech"](). 
+This is the author's official PyTorch implementation for ["Disentangled Adversarial Domain Adaptation for Phonation Mode Detection in Singing and Speech"]().
+
 This paper has been ACCEPTED for publication in the IEEE Transactions on Audio, Speech and Language Processing.
 
 
@@ -37,5 +38,5 @@ python train_da_ss.py models/DADAN_SS/run_model.yaml
 If you use this paper or codebase in your own work, please cite our paper:
 
 ```BibTex
-(TO BE ADDED)
+(To be added)
 ```
